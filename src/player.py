@@ -13,13 +13,14 @@ class PlayerType(Enum):
 @dataclass
 class Player:
   """ player class """
-  def __init__(self, player_type, starting_inv, starting_demand, num_rounds, simulate=False, avg_demand=5, std_demand=1):
+  def __init__(self, player_type, starting_inv, starting_demand, num_rounds, simulate=False, avg_demand=5, LB=0, UB=10):
     self.player_type = player_type
     self.num_rounds = num_rounds
     self.current_round = 0
     self.simulate = simulate
     self.avg_demand = avg_demand
-    self.std_demand = std_demand
+    self.LB = LB
+    self.UB = UB
 
     self.demand = [0] * (num_rounds)
     self.received = [0] * (num_rounds)
@@ -32,6 +33,10 @@ class Player:
     self.start_inv[0] = starting_inv
     self.end_inv[0] = max(starting_inv - self.shipped[0] + self.received[0], 0)
     self.demand[0] = starting_demand
+
+    if self.player_type == PlayerType.RETAILER:
+      print("initializing demand for whole game")
+      self.demand = self.simulate_demand()
 
   def log(self) -> pd.DataFrame:
     return pd.DataFrame({
@@ -66,16 +71,17 @@ class Player:
     message = f"Demand is {current_demand} you have {available_units} available units. \nHow many would you like to ship?"
     # send all units available to meet demand
 
+    default_amount_shipped = min(current_demand, available_units)
+
     if not self.simulate:
       amount_shipped = self.get_amount_from_user(message)
+      print("\n input: ", amount_shipped)
+
+      if amount_shipped > available_units:
+        print("Can't ship that many shipping default")
+        amount_shipped = default_amount_shipped
     else:
-      amount_shipped = self.simulate_demand()
-
-    print("\n input: ", amount_shipped)
-
-    if amount_shipped < available_units:
-      print("You can't ship that many. Sending min(demand, available)")
-      amount_shipped = min(current_demand, available_units)
+      amount_shipped = default_amount_shipped
 
     self.end_inv[self.current_round] = self.start_inv[self.current_round] \
                                         + self.received[self.current_round] \
@@ -93,10 +99,6 @@ class Player:
     downstream.received[self.current_round + transport_lead_time] = amount_shipped
 
   def order(self, upstream, order_lead_time) -> None:
-    if upstream is None:
-      print("Manuf level")
-      return
-
     available_units = self.end_inv[self.current_round]
     message = f"You have {available_units}. \nHow many units would you like to order? \n"
 
@@ -105,6 +107,11 @@ class Player:
       desired_amount = self.get_amount_from_user(message)
     else:
       desired_amount = self.simulate_order()
+
+    if upstream is None:
+      print(f"Manuf produces {desired_amount} units")
+      self.received[self.current_round + order_lead_time] = desired_amount
+      return
 
     upstream.demand[self.current_round + order_lead_time] = desired_amount
 
@@ -120,15 +127,15 @@ class Player:
     return order_amount
 
   def simulate_demand(self) -> int:
-    demand = int(np.random.normal(self.avg_demand, self.std_demand))
-    return demand
+    demand = np.random.triangular(self.LB, self.avg_demand, self.UB, self.num_rounds)
+    return [round(d) for d in demand]
 
   def simulate_order(self) -> int:
     stats = self.log()
-    avg_demand = int(stats['demand'][stats['demand' != 0]].mean())
+    avg_demand = round(stats['demand'][stats['demand'] != 0].mean())
     return avg_demand
 
   def calculate_round_cost(self, unit_holding_cost, unit_underage_cost) -> None:
     holding_cost = unit_holding_cost * self.start_inv[self.current_round]
-    underage_cost = unit_underage_cost * min(self.demand[self.current_round] - self.shipped[self.current_round], 0)
+    underage_cost = unit_underage_cost * max(self.demand[self.current_round] - self.shipped[self.current_round], 0)
     self.round_cost[self.current_round] = holding_cost + underage_cost

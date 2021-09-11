@@ -2,18 +2,19 @@ from src.player import PlayerType, Player
 
 class Game:
   """ overall game class """
-  def __init__(self, num_rounds: int, order_lead_time: int, transport_lead_time: int):
+  def __init__(self, num_rounds: int, order_lead_time: int, transport_lead_time: int, simulate: bool):
     print("init")
     self.players = []
     self.num_rounds = num_rounds
     self.order_lead_time = order_lead_time
     self.transport_lead_time = transport_lead_time
+    self.simulate = simulate
 
   def initialize_players(self, starting_inv, starting_demand):
-    retailer = Player(PlayerType.RETAILER, starting_inv, starting_demand, self.num_rounds)
-    suplier = Player(PlayerType.SUPPLIER, starting_inv, starting_demand, self.num_rounds)
-    distributor = Player(PlayerType.DISTRIBUTOR, starting_inv, starting_demand, self.num_rounds)
-    manufacturer = Player(PlayerType.MANUFACTURER, starting_inv, starting_demand, self.num_rounds)
+    retailer = Player(PlayerType.RETAILER, starting_inv, starting_demand, self.num_rounds, simulate=self.simulate)
+    suplier = Player(PlayerType.SUPPLIER, starting_inv, starting_demand, self.num_rounds, simulate=self.simulate)
+    distributor = Player(PlayerType.DISTRIBUTOR, starting_inv, starting_demand, self.num_rounds, simulate=self.simulate)
+    manufacturer = Player(PlayerType.MANUFACTURER, starting_inv, starting_demand, self.num_rounds, simulate=self.simulate)
     self.players = [retailer, suplier, distributor, manufacturer]
   
   def take_turn(self, player, upstream, downstream, current_round):
@@ -24,6 +25,11 @@ class Game:
     player.order(upstream, self.order_lead_time)
 
     print("\n player log: \n", player.log())
+
+  def save_logs(self):
+    for p in self.players:
+      log = p.log()
+      log.to_csv(f"src/game_logs/{p.player_type}_log.csv")
 
   def run(self):
     print("Started game")
@@ -39,3 +45,6 @@ class Game:
         self.take_turn(player, upstream, downstream, current_round)
 
       current_round += 1
+
+    self.save_logs()
+    
