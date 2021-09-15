@@ -28,6 +28,7 @@ class TestPlayerMethods(ut.TestCase):
       2. checks if the input amount is available
       3. Updates end_inv, start_inv, and shipped
       4. Updates downstream received
+      5. Update back_orders
     """
     num_rounds = 2
     starting_inv = 15
@@ -44,6 +45,32 @@ class TestPlayerMethods(ut.TestCase):
       self.assertEqual(player.end_inv, [10, 0])
       self.assertEqual(player.start_inv, [15, 10])
       self.assertEqual(player.shipped, [5, 0])
+  
+  def test_send_outbound_back_order(self):
+    """
+      test outbound
+      1. gets input from user
+      2. checks if the input amount is available
+      3. Updates end_inv, start_inv, and shipped
+      4. Updates downstream received
+      5. Update back_orders
+    """
+    num_rounds = 2
+    starting_inv = 15
+    starting_demand = 5
+    t_lead_time = 1
+
+    with ut.mock.patch('src.player.Player.get_amount_from_user') as mock_input:
+      player = Player(PlayerType.SUPPLIER, starting_inv, starting_demand, num_rounds)
+      downstream = Player(PlayerType.RETAILER, starting_inv, starting_demand, num_rounds)
+
+      mock_input.return_value = 4
+      player.send_outbound(downstream, t_lead_time)
+
+      self.assertEqual(player.end_inv, [10, 0, 0])
+      self.assertEqual(player.start_inv, [15, 10, 0])
+      self.assertEqual(player.shipped, [4, 0, 0])
+      self.assertEqual(player.back_orders, [0, 1, 0])
 
   def test_order(self):
     """
@@ -108,7 +135,7 @@ class TestPlayerMethods(ut.TestCase):
     self.assertEqual(list(log_df.columns), expected_cols)
     self.assertEqual(log_df.shape, (2, 7))
 
-  def test_simulate_demand(self):
+  def test_simulate_demand_triangular(self):
     """
       simulates demand via normal distribution
       1. consider avg_demand and std_demand passed to function
@@ -117,11 +144,25 @@ class TestPlayerMethods(ut.TestCase):
     num_rounds = 2
     player = Player(PlayerType.RETAILER, 15, 5, num_rounds)
 
-    d = player.simulate_demand()
+    d = player.simulate_demand_triangular()
     avg = sum(d) / len(d)
     self.assertEqual(len(d), 2)
     self.assertGreater(avg, player.LB)
     self.assertLess(avg, player.UB)
+
+  def test_simulate_demand_naive(self):
+    """
+      simulates demand via normal distribution
+      1. consider avg_demand and std_demand passed to function
+      2. returns positive value
+    """
+    num_rounds = 10
+    player = Player(PlayerType.RETAILER, 15, 5, num_rounds)
+
+    d = player.simulate_demand_naive()
+
+    self.assertEqual(len(d), 11)
+    self.assertEqual(d, [5, 5, 5, 10, 10, 10, 10, 10, 10, 10, 10])
 
   def test_simulate_order(self):
     """
@@ -147,6 +188,13 @@ class TestPlayerMethods(ut.TestCase):
       simulates order
       1. calculates avg order
       2. makes order for average
+    """
+
+  def test_total_lead_time_correct(self):
+    """
+      Test lead time correct
+      if order_lead_time = 1 and transport_lead_time = 1
+      it should take 2 rounds for the product to be received
     """
 
 

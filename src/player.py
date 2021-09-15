@@ -19,34 +19,41 @@ class Player:
     self.current_round = 0
     self.simulate = simulate
     self.avg_demand = avg_demand
+    self.starting_demand = starting_demand
     self.LB = LB
     self.UB = UB
 
-    self.demand = [0] * (num_rounds)
-    self.received = [0] * (num_rounds)
-    self.shipped = [0] * (num_rounds)
-    self.start_inv = [0] * (num_rounds)
-    self.end_inv = [0] * (num_rounds)
-    self.round_cost = [0] * (num_rounds)
+    # todo figure out a cleaner way of doing the indexing
+    self.index = num_rounds + 1
+    # demand will get updated programatically
+    self.demand = [starting_demand] * (self.index)
+    self.received = [0] * (self.index)
+    self.shipped = [0] * (self.index)
+    self.back_orders = [0] * (self.index)
+    self.start_inv = [0] * (self.index)
+    self.end_inv = [0] * (self.index)
+    self.round_cost = [0] * (self.index)
+    self.orders = [0] * (self.index)
 
     # set initial conditions
     self.start_inv[0] = starting_inv
     self.end_inv[0] = max(starting_inv - self.shipped[0] + self.received[0], 0)
-    self.demand[0] = starting_demand
 
     if self.player_type == PlayerType.RETAILER:
       print("initializing demand for whole game")
-      self.demand = self.simulate_demand()
+      self.demand = self.simulate_demand_naive()
 
   def log(self) -> pd.DataFrame:
     return pd.DataFrame({
-      "round": [i+1 for i in range(self.num_rounds)],
+      "round": [i+1 for i in range(self.index)],
       "start_inv": self.start_inv,
       "received": self.received,
       "demand": self.demand,
       "shipped": self.shipped,
+      "back_orders": self.back_orders,
       "end_inv": self.end_inv,
-      "round_cost": self.round_cost
+      "round_cost": self.round_cost,
+      "ordered": self.orders
       })
 
   def receive_inbound(self, upstream, transport_lead_time) -> None:
@@ -65,7 +72,7 @@ class Player:
     self.received[self.current_round] = inbound
 
   def send_outbound(self, downstream, transport_lead_time) -> None:
-    current_demand = self.demand[self.current_round]
+    current_demand = self.demand[self.current_round] + self.back_orders[self.current_round]
 
     available_units = self.received[self.current_round] + self.start_inv[self.current_round]
     message = f"Demand is {current_demand} you have {available_units} available units. \nHow many would you like to ship?"
@@ -83,6 +90,9 @@ class Player:
     else:
       amount_shipped = default_amount_shipped
 
+    if amount_shipped < current_demand:
+      self.back_orders[min(self.current_round + 1, self.num_rounds)] = current_demand - amount_shipped
+
     self.end_inv[self.current_round] = self.start_inv[self.current_round] \
                                         + self.received[self.current_round] \
                                           - amount_shipped
@@ -96,7 +106,7 @@ class Player:
       return
 
     # update downstream received
-    downstream.received[self.current_round + transport_lead_time] = amount_shipped
+    downstream.received[min(self.current_round + 1 + transport_lead_time, self.num_rounds)] = amount_shipped
 
   def order(self, upstream, order_lead_time) -> None:
     available_units = self.end_inv[self.current_round]
@@ -110,10 +120,12 @@ class Player:
 
     if upstream is None:
       print(f"Manuf produces {desired_amount} units")
+      self.orders[self.current_round] = desired_amount
       self.received[self.current_round + order_lead_time] = desired_amount
       return
 
-    upstream.demand[self.current_round + order_lead_time] = desired_amount
+    self.orders[self.current_round] = desired_amount
+    upstream.demand[min(self.current_round + order_lead_time + 1, self.num_rounds)] = desired_amount
 
   def get_amount_from_user(self, message) -> int:
     print(message)
@@ -126,16 +138,28 @@ class Player:
 
     return order_amount
 
-  def simulate_demand(self) -> int:
-    demand = np.random.triangular(self.LB, self.avg_demand, self.UB, self.num_rounds)
+  def simulate_demand_triangular(self) -> int:
+    demand = np.random.triangular(self.LB, self.avg_demand, self.UB, self.index)
     return [round(d) for d in demand]
 
-  def simulate_order(self) -> int:
-    stats = self.log()
-    avg_demand = round(stats['demand'][stats['demand'] != 0].mean())
-    return avg_demand
+  def simulate_demand_naive(self) -> int:
+    # could maybe make simulate into its own class to increase cohesion
+    before_demand_increased = int(self.num_rounds / 3)
+    print(before_demand_increased)
+    demand_start = [self.starting_demand] * before_demand_increased
+    print(demand_start)
+    demand_end = [self.starting_demand*2] * (self.index - before_demand_increased)
 
-  def calculate_round_cost(self, unit_holding_cost, unit_underage_cost) -> None:
+    demand = demand_start + demand_end
+    return demand
+  
+  def simulate_order(self) -> int:
+    # stats = self.log()
+    # order = round(stats['demand'][stats['demand'] != 0].mean())
+    order = round(self.demand[max(self.current_round-1, 0)] + self.back_orders[self.current_round])
+    return order
+
+  def calculate_round_cost(self, unit_holding_cost=1, unit_underage_cost=1) -> None:
     holding_cost = unit_holding_cost * self.start_inv[self.current_round]
     underage_cost = unit_underage_cost * max(self.demand[self.current_round] - self.shipped[self.current_round], 0)
     self.round_cost[self.current_round] = holding_cost + underage_cost

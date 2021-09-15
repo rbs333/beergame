@@ -1,3 +1,4 @@
+import pandas as pd
 from src.player import PlayerType, Player
 
 class Game:
@@ -23,19 +24,32 @@ class Game:
     player.receive_inbound(upstream, self.transport_lead_time)
     player.send_outbound(downstream, self.transport_lead_time)
     player.order(upstream, self.order_lead_time)
+    player.calculate_round_cost()
 
     print("\n player log: \n", player.log())
 
   def save_logs(self):
+    cols = list(self.players[0].log().columns)
+    cols.append("player")
+    all_players = pd.DataFrame(columns=cols)
+
     for p in self.players:
       log = p.log()
-      log.to_csv(f"src/game_logs/{p.player_type}_log.csv")
+      log = log[log["round"] != self.num_rounds + 1]
+      log["player"] = str(p.player_type).split(".")[1]
+      all_players = all_players.append(log)
+      
+    cost_view = all_players.pivot(index="round", columns="player", values="demand")
+    ax = cost_view.plot(figsize=(10,5), alpha=0.6)
+    fig = ax.get_figure()
+    fig.savefig("src/game_logs/demand_chart.png")
+    all_players.to_csv("src/game_logs/game_logs.csv")
 
   def run(self):
     print("Started game")
     print(f"Rounds: {self.num_rounds} \n\n")
     current_round = 0
-    while current_round <= self.num_rounds:
+    while current_round < self.num_rounds:
       print(f"Starting round: {current_round + 1} \n")
       # Take each players turn
       for i, player in enumerate(self.players):

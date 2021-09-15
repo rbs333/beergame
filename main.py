@@ -2,10 +2,10 @@ from src.game import Game
 from src.player import Player, PlayerType
 
 def main():
-  num_rounds = 10
+  num_rounds = 20
   transport_lead_time = 1
   order_lead_time = 1
-  starting_inv = 15
+  starting_inv = 10
   starting_demand = 5
   simulate = True
 
