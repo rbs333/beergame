@@ -11,12 +11,17 @@ class Game:
     self.transport_lead_time = transport_lead_time
     self.simulate = simulate
 
-  def initialize_players(self, starting_inv, starting_demand):
-    retailer = Player(PlayerType.RETAILER, starting_inv, starting_demand, self.num_rounds, simulate=self.simulate)
-    suplier = Player(PlayerType.SUPPLIER, starting_inv, starting_demand, self.num_rounds, simulate=self.simulate)
-    distributor = Player(PlayerType.DISTRIBUTOR, starting_inv, starting_demand, self.num_rounds, simulate=self.simulate)
-    manufacturer = Player(PlayerType.MANUFACTURER, starting_inv, starting_demand, self.num_rounds, simulate=self.simulate)
-    self.players = [retailer, suplier, distributor, manufacturer]
+  def initialize_players(self, starting_inv, starting_demand, player_clients):
+    retailer = Player(PlayerType.RETAILER, starting_inv, starting_demand, 
+                      self.num_rounds, simulate=self.simulate, websocket=player_clients["RETAILER"])
+    supplier = Player(PlayerType.SUPPLIER, starting_inv, starting_demand, 
+                      self.num_rounds, simulate=self.simulate, websocket=player_clients["SUPPLIER"])
+    distributor = Player(PlayerType.DISTRIBUTOR, starting_inv, starting_demand, 
+                      self.num_rounds, simulate=self.simulate, websocket=player_clients["DISTRIBUTOR"])
+    manufacturer = Player(PlayerType.MANUFACTURER, starting_inv, starting_demand, 
+                          self.num_rounds, simulate=self.simulate, websocket=player_clients["MANUFACTURER"])
+
+    self.players = [retailer, supplier, distributor, manufacturer]
   
   def take_turn(self, player, upstream, downstream, current_round):
     print("executing turn \n")
@@ -41,6 +46,11 @@ class Game:
       
     cost_view = all_players.pivot(index="round", columns="player", values="demand")
     ax = cost_view.plot(figsize=(10,5), alpha=0.6)
+    ax.set_title("Demand curve")
+    ax.set_xlabel("week")
+    ax.set_ylabel("demand")
+    ax.text(1, all_players.demand.max() / 2, "Note: retailer demand is the actual demand.")
+
     fig = ax.get_figure()
     fig.savefig("src/game_logs/demand_chart.png")
     all_players.to_csv("src/game_logs/game_logs.csv")

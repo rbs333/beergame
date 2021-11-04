@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+import json
 
 class PlayerType(Enum):
   MANUFACTURER = auto()
@@ -13,7 +14,7 @@ class PlayerType(Enum):
 @dataclass
 class Player:
   """ player class """
-  def __init__(self, player_type, starting_inv, starting_demand, num_rounds, simulate=False, avg_demand=5, LB=0, UB=10):
+  def __init__(self, player_type, starting_inv, starting_demand, num_rounds, simulate=False, websocket=None, avg_demand=5, LB=0, UB=10):
     self.player_type = player_type
     self.num_rounds = num_rounds
     self.current_round = 0
@@ -22,18 +23,19 @@ class Player:
     self.starting_demand = starting_demand
     self.LB = LB
     self.UB = UB
+    self.websocket = websocket
 
     # todo figure out a cleaner way of doing the indexing
-    self.index = num_rounds + 1
+    # self.index = num_rounds + 1
     # demand will get updated programatically
-    self.demand = [starting_demand] * (self.index)
-    self.received = [0] * (self.index)
-    self.shipped = [0] * (self.index)
-    self.back_orders = [0] * (self.index)
-    self.start_inv = [0] * (self.index)
-    self.end_inv = [0] * (self.index)
-    self.round_cost = [0] * (self.index)
-    self.orders = [0] * (self.index)
+    self.demand = [starting_demand] * (self.num_rounds)
+    self.received = [0] * (self.num_rounds)
+    self.shipped = [0] * (self.num_rounds)
+    self.back_orders = [0] * (self.num_rounds)
+    self.start_inv = [0] * (self.num_rounds)
+    self.end_inv = [0] * (self.num_rounds)
+    self.round_cost = [0] * (self.num_rounds)
+    self.orders = [0] * (self.num_rounds)
 
     # set initial conditions
     self.start_inv[0] = starting_inv
@@ -45,7 +47,7 @@ class Player:
 
   def log(self) -> pd.DataFrame:
     return pd.DataFrame({
-      "round": [i+1 for i in range(self.index)],
+      "round": [i+1 for i in range(self.num_rounds)],
       "start_inv": self.start_inv,
       "received": self.received,
       "demand": self.demand,
@@ -91,7 +93,11 @@ class Player:
       amount_shipped = default_amount_shipped
 
     if amount_shipped < current_demand:
-      self.back_orders[min(self.current_round + 1, self.num_rounds)] = current_demand - amount_shipped
+      index = self.current_round + 1
+      if index >= self.num_rounds:
+        return
+
+      self.back_orders[index] = current_demand - amount_shipped
 
     self.end_inv[self.current_round] = self.start_inv[self.current_round] \
                                         + self.received[self.current_round] \
@@ -106,14 +112,21 @@ class Player:
       return
 
     # update downstream received
-    downstream.received[min(self.current_round + 1 + transport_lead_time, self.num_rounds)] = amount_shipped
+    index = self.current_round + 1 + transport_lead_time
+
+    if index >= self.num_rounds:
+      return
+    
+    downstream.received[index] = amount_shipped
 
   def order(self, upstream, order_lead_time) -> None:
     available_units = self.end_inv[self.current_round]
     message = f"You have {available_units}. \nHow many units would you like to order? \n"
 
     # do validation on input that amount is okay
-    if not self.simulate:
+    if not self.simulate and self.websocket:
+      desired_amount = self.ping_client(available_units)
+    elif not self.simulate:
       desired_amount = self.get_amount_from_user(message)
     else:
       desired_amount = self.simulate_order()
@@ -121,11 +134,38 @@ class Player:
     if upstream is None:
       print(f"Manuf produces {desired_amount} units")
       self.orders[self.current_round] = desired_amount
+
+      index = self.current_round + order_lead_time
+
+      if index >= self.num_rounds:
+        return
+      
       self.received[self.current_round + order_lead_time] = desired_amount
       return
 
     self.orders[self.current_round] = desired_amount
-    upstream.demand[min(self.current_round + order_lead_time + 1, self.num_rounds)] = desired_amount
+
+    index = self.current_round + order_lead_time + 1
+    if index >= self.num_rounds:
+      return
+
+    upstream.demand[index] = desired_amount
+
+  def ping_client_order(self, available_units) -> int:
+    round_info = {
+      "type": "get_order",
+      "round": self.current_round,
+      "available_units": available_units,
+      "player": self.player_type
+    }
+    
+    def dump_round_info():
+      json.dumps(round_info) 
+
+    self.websocket.send(round_info, dump_round_info())
+  
+  def dump_client_info(self):
+    return 
 
   def get_amount_from_user(self, message) -> int:
     print(message)
@@ -139,7 +179,7 @@ class Player:
     return order_amount
 
   def simulate_demand_triangular(self) -> int:
-    demand = np.random.triangular(self.LB, self.avg_demand, self.UB, self.index)
+    demand = np.random.triangular(self.LB, self.avg_demand, self.UB, self.num_rounds)
     return [round(d) for d in demand]
 
   def simulate_demand_naive(self) -> int:
@@ -148,7 +188,7 @@ class Player:
     print(before_demand_increased)
     demand_start = [self.starting_demand] * before_demand_increased
     print(demand_start)
-    demand_end = [self.starting_demand*2] * (self.index - before_demand_increased)
+    demand_end = [self.starting_demand*2] * (self.num_rounds - before_demand_increased)
 
     demand = demand_start + demand_end
     return demand
